@@ -26,6 +26,14 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Additional tools for Odoo development workflow
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    postgresql-client \
+    sshpass \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

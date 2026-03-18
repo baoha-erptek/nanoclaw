@@ -17,6 +17,10 @@ groups/main/*
 groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/telegram_nwf-qa/
+groups/telegram_nwf-qa/scripts/
+groups/telegram_nwf-qa/.gitconfig
+groups/telegram_nwf-qa/conversations/
 
 # Secrets
 *.keys.json
