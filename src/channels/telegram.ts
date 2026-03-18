@@ -178,6 +178,19 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
       await bot.stop();
       logger.info('Telegram bot stopped');
     },
+
+    async setTyping(jid: string, isTyping: boolean): Promise<void> {
+      if (!isTyping) return;
+      const chatId = jidToChatId(jid);
+      try {
+        await bot.api.sendChatAction(chatId, 'typing');
+      } catch (err) {
+        logger.debug(
+          { chatId, error: err instanceof Error ? err.message : String(err) },
+          'Failed to send typing indicator',
+        );
+      }
+    },
   };
 
   return channel;

@@ -67,6 +67,12 @@ KHÔNG hardcode credentials. Luôn dùng `$VAR_NAME` từ environment.
 
 Khi người dùng nhắc đến NCNB-XXXX:
 
+### Bước 0: Xác nhận tiếp nhận (BẮT BUỘC)
+QUAN TRỌNG: LUÔN gửi tin nhắn xác nhận NGAY LẬP TỨC trước khi bắt đầu bất kỳ công việc nào.
+Ví dụ: "Đã nhận ticket NCNB-XXXX. Đang phân tích, vui lòng chờ trong giây lát..."
+
+Điều này giúp người dùng biết rằng agent đang hoạt động và xử lý yêu cầu.
+
 ### Bước 1: Tìm hiểu (opsx:explore)
 - Lấy thông tin JIRA ticket, tải attachments
 - Phân tích codebase tại /workspace/extra/hr_project/
