@@ -9,6 +9,7 @@
 import { Bot, Context } from 'grammy';
 import pino from 'pino';
 
+import { readEnvFile } from '../env.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel, NewMessage } from '../types.js';
 
@@ -28,7 +29,9 @@ function jidToChatId(jid: string): number {
 }
 
 function createTelegramChannel(opts: ChannelOpts): Channel | null {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  // Read token from .env (NanoClaw doesn't load .env into process.env for security)
+  const envSecrets = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const token = envSecrets.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     logger.info('TELEGRAM_BOT_TOKEN not set — Telegram channel disabled');
     return null;
