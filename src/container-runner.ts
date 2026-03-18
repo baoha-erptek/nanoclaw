@@ -26,6 +26,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -215,6 +216,7 @@ function buildVolumeMounts(
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  group: RegisteredGroup,
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -259,6 +261,17 @@ function buildContainerArgs(
     }
   }
 
+  // Inject additional environment variables from .env for this group
+  const additionalEnvKeys = group.containerConfig?.additionalEnvKeys;
+  if (additionalEnvKeys && additionalEnvKeys.length > 0) {
+    const envValues = readEnvFile(additionalEnvKeys);
+    for (const key of additionalEnvKeys) {
+      if (envValues[key]) {
+        args.push('-e', `${key}=${envValues[key]}`);
+      }
+    }
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
@@ -278,7 +291,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group);
 
   logger.debug(
     {

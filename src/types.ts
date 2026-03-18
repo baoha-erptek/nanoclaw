@@ -30,6 +30,10 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  // Environment variable names to read from .env and inject into the container.
+  // Values are read from the host .env file at container start time.
+  // This keeps secrets centralized in .env instead of scattered in scripts.
+  additionalEnvKeys?: string[];
 }
 
 export interface RegisteredGroup {

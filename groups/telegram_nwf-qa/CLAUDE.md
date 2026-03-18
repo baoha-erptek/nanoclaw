@@ -28,8 +28,9 @@ Chỉ sử dụng tiếng Anh cho:
 
 ## Truy cập JIRA
 
+Credentials được inject qua environment variables từ .env (KHÔNG hardcode):
+
 ```bash
-source /workspace/group/scripts/atlassian-env.sh
 curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
   "$ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX"
 ```
@@ -37,7 +38,6 @@ curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
 ## Truy cập Test Server
 
 ```bash
-source /workspace/group/scripts/ssh-env.sh
 sshpass -p "$SSH_TEST_PASS" ssh -o StrictHostKeyChecking=no \
   -p $SSH_TEST_PORT $SSH_TEST_USER@$SSH_TEST_HOST "<command>"
 ```
@@ -47,6 +47,19 @@ sshpass -p "$SSH_TEST_PASS" ssh -o StrictHostKeyChecking=no \
 ```bash
 export GIT_CONFIG_GLOBAL=/workspace/group/.gitconfig
 ```
+
+## Environment Variables (injected từ .env)
+
+Các biến sau được tự động inject vào container qua `additionalEnvKeys`:
+- `ATLASSIAN_EMAIL` — JIRA API email
+- `ATLASSIAN_API_TOKEN` — JIRA API token
+- `ATLASSIAN_SITE` — JIRA site URL
+- `SSH_TEST_HOST` — Test server IP
+- `SSH_TEST_PORT` — Test server SSH port
+- `SSH_TEST_USER` — Test server SSH user
+- `SSH_TEST_PASS` — Test server SSH password
+
+KHÔNG hardcode credentials. Luôn dùng `$VAR_NAME` từ environment.
 
 ---
 
@@ -115,7 +128,7 @@ KẾT QUẢ TEST:
 ## Docker/Server
 
 - Local Odoo: docker exec hr_project_odoo odoo -d hr_project_db -u MODULE --stop-after-init
-- Test server SSH: sshpass -p "$SSH_TEST_PASS" ssh -p 2229 root@192.168.1.243
+- Test server SSH: sshpass -p "$SSH_TEST_PASS" ssh -p $SSH_TEST_PORT $SSH_TEST_USER@$SSH_TEST_HOST
 - Test container: nwf_odoo_test
 - Auto-deploy: push vào develop → auto-deploy watcher trên .243 tự động pull + upgrade
 

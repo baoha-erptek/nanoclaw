@@ -1,0 +1,5 @@
+[user]
+    name = OdooDev Bot
+    email = odoodev@erptek.net
+[safe]
+    directory = /workspace/extra/hr_project
