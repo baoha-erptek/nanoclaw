@@ -132,6 +132,50 @@ function resolveAttachmentDir(
   }
 }
 
+/**
+ * Escape underscores outside of backtick code spans to prevent
+ * Telegram's legacy Markdown parser from treating them as italic markers.
+ */
+function escapeTelegramMarkdown(text: string): string {
+  // Split by backtick-delimited segments (both ``` and `)
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`)/);
+  return parts
+    .map((part, i) => {
+      // Odd indices are code spans — leave them untouched
+      if (i % 2 === 1) return part;
+      // In non-code segments, escape bare underscores
+      return part.replace(/_/g, '\\_');
+    })
+    .join('');
+}
+
+/**
+ * Send a message with Markdown formatting, falling back to plain text
+ * if Telegram rejects the formatting (HTTP 400).
+ */
+async function sendWithMarkdownFallback(
+  bot: Bot,
+  chatId: number,
+  text: string,
+): Promise<void> {
+  try {
+    const sanitized = escapeTelegramMarkdown(text);
+    await bot.api.sendMessage(chatId, sanitized, { parse_mode: 'Markdown' });
+  } catch (err: unknown) {
+    const isParseError =
+      err instanceof Error &&
+      'error_code' in err &&
+      (err as { error_code: number }).error_code === 400 &&
+      String(err.message).includes("can't parse entities");
+    if (isParseError) {
+      logger.warn({ chatId }, 'Markdown parse failed, sending as plain text');
+      await bot.api.sendMessage(chatId, text);
+    } else {
+      throw err;
+    }
+  }
+}
+
 function createTelegramChannel(opts: ChannelOpts): Channel | null {
   // Read token from .env (NanoClaw doesn't load .env into process.env for security)
   const envSecrets = readEnvFile(['TELEGRAM_BOT_TOKEN']);
@@ -401,7 +445,7 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
       // Split long messages at line boundaries.
       const MAX_LEN = 4000;
       if (text.length <= MAX_LEN) {
-        await bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+        await sendWithMarkdownFallback(bot, chatId, text);
         return;
       }
 
@@ -410,9 +454,7 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
       for (const line of lines) {
         if (chunk.length + line.length + 1 > MAX_LEN) {
           if (chunk) {
-            await bot.api.sendMessage(chatId, chunk, {
-              parse_mode: 'Markdown',
-            });
+            await sendWithMarkdownFallback(bot, chatId, chunk);
           }
           chunk = line;
         } else {
@@ -420,7 +462,7 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
         }
       }
       if (chunk) {
-        await bot.api.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
+        await sendWithMarkdownFallback(bot, chatId, chunk);
       }
     },
 
