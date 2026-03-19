@@ -11,7 +11,28 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+// Mock fs.readFileSync so resolveOAuthToken() doesn't read real credentials.json
+let mockCredentialsJson: string | null = null;
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    readFileSync: vi.fn((path: string, encoding?: string) => {
+      if (typeof path === 'string' && path.includes('.credentials.json')) {
+        if (mockCredentialsJson !== null) {
+          return mockCredentialsJson;
+        }
+        throw new Error('ENOENT: no such file');
+      }
+      return actual.readFileSync(path, encoding as BufferEncoding);
+    }),
+  };
+});
+
+import {
+  startCredentialProxy,
+  resetOAuthTokenCache,
+} from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -68,6 +89,8 @@ describe('credential-proxy', () => {
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+    mockCredentialsJson = null;
+    resetOAuthTokenCache();
   });
 
   async function startProxy(env: Record<string, string>): Promise<number> {
@@ -188,5 +211,60 @@ describe('credential-proxy', () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe('Bad Gateway');
+  });
+
+  it('OAuth mode reads token from credentials.json when available', async () => {
+    mockCredentialsJson = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'token-from-credentials-json',
+        expiresAt: Date.now() + 3600_000, // 1 hour from now
+      },
+    });
+
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'stale-env-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    // Should prefer credentials.json over .env
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer token-from-credentials-json',
+    );
+  });
+
+  it('OAuth mode falls back to .env when credentials.json is missing', async () => {
+    // mockCredentialsJson is null → readFileSync throws → falls back to .env
+    proxyPort = await startProxy({
+      CLAUDE_CODE_OAUTH_TOKEN: 'env-fallback-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe(
+      'Bearer env-fallback-token',
+    );
   });
 });
