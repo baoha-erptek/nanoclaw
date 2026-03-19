@@ -31,9 +31,53 @@ Chỉ sử dụng tiếng Anh cho:
 Credentials được inject qua environment variables từ .env (KHÔNG hardcode):
 
 ```bash
+# Lấy thông tin ticket
 curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
   "$ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX"
+
+# BẮT BUỘC: Lấy TẤT CẢ comments (bao gồm comment mới nhất của tester)
+curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
+  "$ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX/comment?orderBy=-created&maxResults=100"
 ```
+
+## Tải JIRA Attachments
+
+BẮT BUỘC: Tải tất cả attachments từ JIRA ticket trước khi phân tích.
+
+```bash
+# Lấy danh sách attachments
+curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
+  "$ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX?fields=attachment" | \
+  python3 -c "
+import json, sys, os, urllib.request, base64
+data = json.load(sys.stdin)
+attachments = data.get('fields', {}).get('attachment', [])
+if not attachments:
+    print('Khong co attachment nao.')
+    sys.exit(0)
+task_dir = '/workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/attachments'
+os.makedirs(task_dir, exist_ok=True)
+creds = base64.b64encode(f'{os.environ[\"ATLASSIAN_EMAIL\"]}:{os.environ[\"ATLASSIAN_API_TOKEN\"]}'.encode()).decode()
+for att in attachments:
+    url = att['content']
+    fname = att['filename']
+    dest = os.path.join(task_dir, fname)
+    req = urllib.request.Request(url, headers={'Authorization': f'Basic {creds}'})
+    with urllib.request.urlopen(req) as resp, open(dest, 'wb') as f:
+        f.write(resp.read())
+    print(f'Da tai: {dest} ({att.get(\"size\", 0)} bytes)')
+"
+```
+
+Thay `NCNB-XXXX` bang ma ticket thuc te (2 cho: URL va task_dir).
+
+QUAN TRỌNG: LUÔN LUÔN lấy comments khi xử lý ticket. Comments chứa:
+- Phản hồi từ tester (lỗi, screenshots, bước tái tạo)
+- Thông tin cập nhật mới nhất từ team
+- Hướng dẫn, yêu cầu bổ sung từ người quản lý
+- Kết quả test trước đó
+
+Đọc TẤT CẢ comments theo thứ tự mới nhất trước (orderBy=-created) để nắm bắt tình trạng hiện tại.
 
 ## Truy cập Test Server
 
@@ -85,9 +129,19 @@ Tạo file progress-tracker.md với thông tin ticket cơ bản:
 KHÔNG BAO GIỜ bỏ qua bước này. Mọi ticket đều PHẢI có task directory.
 
 ### Bước 2: Tìm hiểu (opsx:explore)
-- Lấy thông tin JIRA ticket, tải attachments
+- Lấy thông tin JIRA ticket (issue details + description)
+- BẮT BUỘC: Lấy TẤT CẢ comments bằng endpoint riêng:
+  ```bash
+  curl -s -u "$ATLASSIAN_EMAIL:$ATLASSIAN_API_TOKEN" \
+    "$ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX/comment?orderBy=-created&maxResults=100"
+  ```
+  Đọc comments mới nhất trước để hiểu tình trạng hiện tại của ticket.
+  Comments có thể chứa: screenshots, bước tái tạo lỗi, phản hồi test, yêu cầu bổ sung.
+- BẮT BUỘC: Tải TẤT CẢ attachments từ JIRA bằng script trong mục "Tải JIRA Attachments" ở trên.
+  Attachments thường chứa: screenshots lỗi, file log, báo cáo Excel, video quay màn hình.
+  Lưu vào: `/workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/attachments/`
 - Phân tích codebase tại /workspace/extra/hr_project/
-- Tóm tắt bằng tiếng Việt có dấu cho người dùng
+- Tóm tắt bằng tiếng Việt có dấu cho người dùng (bao gồm thông tin từ comments)
 - Xác định nguyên nhân gốc (root cause)
 - Ghi kết quả phân tích vào .docs/tasks/NCNB-XXXX/investigation-plan.md
 
@@ -113,7 +167,9 @@ KHÔNG BAO GIỜ bỏ qua bước này. Mọi ticket đều PHẢI có task dire
 
 ### Bước 5: Xác nhận
 - Thông báo tester: "Đã deploy lên test server, vui lòng kiểm tra"
-- Nếu tester báo lỗi: hỏi thêm thông tin, tiếp tục sửa (quay lại bước 3)
+- Nếu tester báo lỗi:
+  - Kiểm tra lại TẤT CẢ comments mới nhất trên JIRA (có thể tester comment thêm chi tiết ở đó)
+  - Hỏi thêm thông tin, tiếp tục sửa (quay lại bước 3)
 - Nếu tester xác nhận OK: dọn dẹp
 
 ### Bước 6: Dọn dẹp (opsx:archive)
@@ -213,10 +269,11 @@ KHÔNG tạo thư mục `openspec/changes/` riêng. Sử dụng cấu trúc task
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #7407 | 8:34 AM | 🟣 | Telegram Typing Indicator and Immediate Acknowledgment | ~368 |
-| #7406 | " | 🟣 | Telegram Bot Typing Indicator and Immediate Acknowledgment | ~359 |
-| #7371 | 8:02 AM | ✅ | Environment Variable Configuration Changes Staged for Commit | ~728 |
-| #7369 | " | ✅ | Git Files Staged for Commit - Core Framework and Group Configuration | ~951 |
 | #7364 | 8:00 AM | ⚖️ | Credential Management via Environment Variable Injection | ~702 |
-| #7355 | 7:53 AM | 🟣 | Initial Telegram Channel and Odoo Agent Implementation Committed | ~303 |
+
+### Mar 19, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #7478 | 3:40 AM | 🔵 | Odoo Telegram Bot JIRA Comment Handling Investigation (NCNB-1326) | ~751 |
 </claude-mem-context>

@@ -6,10 +6,16 @@
  *
  * JID format: tg:<chat_id> (e.g., tg:-1001234567890)
  */
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import http from 'http';
+
 import { Bot, Context } from 'grammy';
 import pino from 'pino';
 
 import { readEnvFile } from '../env.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel, NewMessage } from '../types.js';
 
@@ -26,6 +32,104 @@ function chatIdToJid(chatId: number | string): string {
 
 function jidToChatId(jid: string): number {
   return Number(jid.slice(JID_PREFIX.length));
+}
+
+const MAX_DOWNLOAD_SIZE = 20 * 1024 * 1024; // 20 MB (Telegram Bot API limit)
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface DownloadResult {
+  readonly localPath: string;
+  readonly containerPath: string;
+  readonly fileSize: number;
+}
+
+function downloadFile(url: string, destPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(destPath);
+    mod
+      .get(url, (res) => {
+        if (res.statusCode !== 200) {
+          file.close();
+          fs.unlinkSync(destPath);
+          reject(new Error(`HTTP ${res.statusCode} downloading file`));
+          return;
+        }
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          resolve();
+        });
+        file.on('error', (err) => {
+          fs.unlinkSync(destPath);
+          reject(err);
+        });
+      })
+      .on('error', (err) => {
+        file.close();
+        try {
+          fs.unlinkSync(destPath);
+        } catch {
+          /* ignore */
+        }
+        reject(err);
+      });
+  });
+}
+
+async function downloadTelegramFile(
+  bot: Bot,
+  token: string,
+  fileId: string,
+  destDir: string,
+  filename: string,
+): Promise<DownloadResult | null> {
+  try {
+    const file = await bot.api.getFile(fileId);
+    if (!file.file_path) return null;
+
+    const url = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+    fs.mkdirSync(destDir, { recursive: true });
+    const localPath = path.join(destDir, filename);
+    await downloadFile(url, localPath);
+
+    const stat = fs.statSync(localPath);
+    const containerPath = localPath
+      .replace(/^.*\/groups\//, '/workspace/group/../groups/')
+      .replace(/^.*groups\/[^/]+/, '/workspace/group');
+
+    return {
+      localPath,
+      containerPath: `/workspace/group/attachments/${path.basename(path.dirname(localPath))}/${filename}`,
+      fileSize: stat.size,
+    };
+  } catch (err) {
+    logger.warn(
+      { fileId, error: err instanceof Error ? err.message : String(err) },
+      'Failed to download Telegram file',
+    );
+    return null;
+  }
+}
+
+function resolveAttachmentDir(
+  chatJid: string,
+  messageId: string,
+  groups: Record<string, { folder: string }>,
+): string | null {
+  const group = groups[chatJid];
+  if (!group) return null;
+  try {
+    const groupDir = resolveGroupFolderPath(group.folder);
+    return path.join(groupDir, 'attachments', messageId);
+  } catch {
+    return null;
+  }
 }
 
 function createTelegramChannel(opts: ChannelOpts): Channel | null {
@@ -92,9 +196,9 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
         opts.onMessage(chatJid, message);
       });
 
-      // Handle photo messages with captions
-      bot.on('message:photo', (ctx: Context) => {
-        if (!ctx.chat || !ctx.from) return;
+      // Handle photo messages — download image + include path
+      bot.on('message:photo', async (ctx: Context) => {
+        if (!ctx.chat || !ctx.from || !ctx.message?.photo) return;
 
         const chatJid = chatIdToJid(ctx.chat.id);
         if (ctx.from.is_bot) return;
@@ -103,15 +207,170 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
           .filter(Boolean)
           .join(' ');
 
-        const caption = ctx.message?.caption || '[Photo received]';
+        const msgId = String(ctx.message.message_id);
+        const caption = ctx.message.caption || '';
+        let content: string;
+
+        // Download the largest photo (last element in array)
+        const photo = ctx.message.photo[ctx.message.photo.length - 1];
+        const attDir = resolveAttachmentDir(
+          chatJid,
+          msgId,
+          opts.registeredGroups(),
+        );
+
+        if (attDir && photo.file_id) {
+          const ext = 'jpg';
+          const filename = `photo_${msgId}.${ext}`;
+          const result = await downloadTelegramFile(
+            bot,
+            token,
+            photo.file_id,
+            attDir,
+            filename,
+          );
+          if (result) {
+            content =
+              `[Photo: ${result.containerPath} (${formatFileSize(result.fileSize)})]\n${caption}`.trim();
+          } else {
+            content = `[Photo: download failed]\n${caption}`.trim();
+          }
+        } else {
+          content = caption || '[Photo received]';
+        }
 
         const message: NewMessage = {
-          id: String(ctx.message!.message_id),
+          id: msgId,
           chat_jid: chatJid,
           sender: String(ctx.from.id),
           sender_name: senderName,
-          content: caption,
-          timestamp: new Date(ctx.message!.date * 1000).toISOString(),
+          content,
+          timestamp: new Date(ctx.message.date * 1000).toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        };
+
+        opts.onMessage(chatJid, message);
+      });
+
+      // Handle document messages (PDF, Excel, CSV, Word, etc.)
+      bot.on('message:document', async (ctx: Context) => {
+        if (!ctx.chat || !ctx.from || !ctx.message?.document) return;
+
+        const chatJid = chatIdToJid(ctx.chat.id);
+        if (ctx.from.is_bot) return;
+
+        const senderName = [ctx.from.first_name, ctx.from.last_name]
+          .filter(Boolean)
+          .join(' ');
+
+        const msgId = String(ctx.message.message_id);
+        const doc = ctx.message.document;
+        const caption = ctx.message.caption || '';
+        const filename = doc.file_name || `document_${msgId}`;
+        const mimeType = doc.mime_type || 'application/octet-stream';
+        let content: string;
+
+        const attDir = resolveAttachmentDir(
+          chatJid,
+          msgId,
+          opts.registeredGroups(),
+        );
+
+        if (
+          attDir &&
+          doc.file_id &&
+          (doc.file_size || 0) <= MAX_DOWNLOAD_SIZE
+        ) {
+          const result = await downloadTelegramFile(
+            bot,
+            token,
+            doc.file_id,
+            attDir,
+            filename,
+          );
+          if (result) {
+            content =
+              `[Document: ${result.containerPath} (${formatFileSize(result.fileSize)}, ${mimeType})]\n${caption}`.trim();
+          } else {
+            content =
+              `[Document: ${filename} - download failed (${mimeType})]\n${caption}`.trim();
+          }
+        } else if ((doc.file_size || 0) > MAX_DOWNLOAD_SIZE) {
+          content =
+            `[Document: ${filename} (${formatFileSize(doc.file_size || 0)}, ${mimeType}) - too large to download]\n${caption}`.trim();
+        } else {
+          content = `[Document: ${filename} (${mimeType})]\n${caption}`.trim();
+        }
+
+        const message: NewMessage = {
+          id: msgId,
+          chat_jid: chatJid,
+          sender: String(ctx.from.id),
+          sender_name: senderName,
+          content,
+          timestamp: new Date(ctx.message.date * 1000).toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        };
+
+        opts.onMessage(chatJid, message);
+      });
+
+      // Handle video messages (metadata only, no download)
+      bot.on('message:video', (ctx: Context) => {
+        if (!ctx.chat || !ctx.from || !ctx.message?.video) return;
+
+        const chatJid = chatIdToJid(ctx.chat.id);
+        if (ctx.from.is_bot) return;
+
+        const senderName = [ctx.from.first_name, ctx.from.last_name]
+          .filter(Boolean)
+          .join(' ');
+
+        const video = ctx.message.video;
+        const duration = video.duration || 0;
+        const fileSize = video.file_size || 0;
+        const caption = ctx.message.caption || '';
+        const content =
+          `[Video: ${duration}s, ${formatFileSize(fileSize)} - not downloaded]\n${caption}`.trim();
+
+        const message: NewMessage = {
+          id: String(ctx.message.message_id),
+          chat_jid: chatJid,
+          sender: String(ctx.from.id),
+          sender_name: senderName,
+          content,
+          timestamp: new Date(ctx.message.date * 1000).toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        };
+
+        opts.onMessage(chatJid, message);
+      });
+
+      // Handle voice messages (metadata only, no download)
+      bot.on('message:voice', (ctx: Context) => {
+        if (!ctx.chat || !ctx.from || !ctx.message?.voice) return;
+
+        const chatJid = chatIdToJid(ctx.chat.id);
+        if (ctx.from.is_bot) return;
+
+        const senderName = [ctx.from.first_name, ctx.from.last_name]
+          .filter(Boolean)
+          .join(' ');
+
+        const voice = ctx.message.voice;
+        const duration = voice.duration || 0;
+        const content = `[Voice message: ${duration}s - audio not supported]`;
+
+        const message: NewMessage = {
+          id: String(ctx.message.message_id),
+          chat_jid: chatJid,
+          sender: String(ctx.from.id),
+          sender_name: senderName,
+          content,
+          timestamp: new Date(ctx.message.date * 1000).toISOString(),
           is_from_me: false,
           is_bot_message: false,
         };
