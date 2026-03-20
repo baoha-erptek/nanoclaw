@@ -128,6 +128,15 @@ Tạo file progress-tracker.md với thông tin ticket cơ bản:
 ```
 KHÔNG BAO GIỜ bỏ qua bước này. Mọi ticket đều PHẢI có task directory.
 
+QUAN TRỌNG - QUY TẮC NHIỀU TICKET LIÊN TIẾP:
+- Mỗi ticket NCNB-XXXX mới PHẢI có task directory RIÊNG, NGAY CẢ KHI đang xử lý nhiều ticket liên tiếp trong cùng một phiên.
+- TRƯỚC KHI viết code cho ticket mới, KIỂM TRA:
+  ```bash
+  ls /workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/progress-tracker.md
+  ```
+  Nếu file KHÔNG tồn tại → DỪNG LẠI và tạo task directory + progress-tracker.md TRƯỚC.
+- Nếu tester báo thêm ticket mới trong cùng cuộc hội thoại → BẮT ĐẦU LẠI từ Bước 0 cho ticket đó.
+
 ### Bước 2: Tìm hiểu (opsx:explore)
 - Lấy thông tin JIRA ticket (issue details + description)
 - BẮT BUỘC: Lấy TẤT CẢ comments bằng endpoint riêng:
@@ -166,6 +175,13 @@ KHÔNG BAO GIỜ bỏ qua bước này. Mọi ticket đều PHẢI có task dire
 - Kiểm tra auto-deploy: SSH test server, xem docker logs
 
 ### Bước 5: Xác nhận
+- KIỂM TRA BẮT BUỘC trước khi báo hoàn thành:
+  ```bash
+  # Verify task directory and progress-tracker exist
+  test -f /workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/progress-tracker.md || echo "CẢNH BÁO: Thiếu progress-tracker.md!"
+  ```
+  Nếu thiếu → tạo ngay progress-tracker.md với thông tin: summary, root cause, fix, commits, module, status.
+- Cập nhật progress-tracker.md với status COMPLETED, commit hashes, và ngày deploy.
 - Thông báo tester: "Đã deploy lên test server, vui lòng kiểm tra"
 - Nếu tester báo lỗi:
   - Kiểm tra lại TẤT CẢ comments mới nhất trên JIRA (có thể tester comment thêm chi tiết ở đó)
