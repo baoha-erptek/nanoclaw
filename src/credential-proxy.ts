@@ -27,6 +27,9 @@ import { logger } from './logger.js';
 
 const CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
 const TOKEN_ENDPOINT = 'https://platform.claude.com/v1/oauth/token';
+const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const OAUTH_SCOPES =
+  'user:profile user:inference user:sessions:claude_code user:mcp_servers';
 const THIRTY_MINUTES = 30 * 60 * 1000;
 const FIVE_MINUTES = 5 * 60 * 1000;
 const REFRESH_CHECK_INTERVAL = 10 * 60 * 1000; // Check every 10 minutes
@@ -99,9 +102,7 @@ function writeCredentials(
  * Calls https://platform.claude.com/v1/oauth/token with grant_type=refresh_token.
  * Returns the new access token or null on failure.
  */
-export function performOAuthRefresh(
-  refreshToken: string,
-): Promise<{
+export function performOAuthRefresh(refreshToken: string): Promise<{
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
@@ -117,6 +118,8 @@ export function performOAuthRefresh(
     const postBody = JSON.stringify({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
+      client_id: OAUTH_CLIENT_ID,
+      scope: OAUTH_SCOPES,
     });
 
     const url = new URL(TOKEN_ENDPOINT);
@@ -228,11 +231,7 @@ async function tryRefreshIfNeeded(): Promise<void> {
     };
 
     // Persist to credentials.json
-    writeCredentials(
-      result.accessToken,
-      result.refreshToken,
-      result.expiresAt,
-    );
+    writeCredentials(result.accessToken, result.refreshToken, result.expiresAt);
   }
 }
 
