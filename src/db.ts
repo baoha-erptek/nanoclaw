@@ -73,6 +73,15 @@ function createSchema(database: Database.Database): void {
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS ticket_sessions (
+      group_folder TEXT NOT NULL,
+      ticket_id TEXT NOT NULL,
+      session_id TEXT,
+      status TEXT DEFAULT 'active',
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER DEFAULT (strftime('%s','now')),
+      PRIMARY KEY (group_folder, ticket_id)
+    );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -524,6 +533,58 @@ export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
+}
+
+// --- Ticket session accessors ---
+
+export function getTicketSession(
+  groupFolder: string,
+  ticketId: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      `SELECT session_id FROM ticket_sessions WHERE group_folder = ? AND ticket_id = ? AND status = 'active'`,
+    )
+    .get(groupFolder, ticketId) as { session_id: string } | undefined;
+  return row?.session_id;
+}
+
+export function setTicketSession(
+  groupFolder: string,
+  ticketId: string,
+  sessionId: string,
+): void {
+  db.prepare(
+    `INSERT INTO ticket_sessions (group_folder, ticket_id, session_id, updated_at)
+     VALUES (?, ?, ?, strftime('%s','now'))
+     ON CONFLICT(group_folder, ticket_id) DO UPDATE SET
+       session_id = excluded.session_id,
+       updated_at = strftime('%s','now')`,
+  ).run(groupFolder, ticketId, sessionId);
+}
+
+export function completeTicketSession(
+  groupFolder: string,
+  ticketId: string,
+): void {
+  db.prepare(
+    `UPDATE ticket_sessions SET status = 'completed', updated_at = strftime('%s','now')
+     WHERE group_folder = ? AND ticket_id = ?`,
+  ).run(groupFolder, ticketId);
+}
+
+export function getActiveTicketForGroup(
+  groupFolder: string,
+): { ticketId: string; sessionId: string } | undefined {
+  const row = db
+    .prepare(
+      `SELECT ticket_id, session_id FROM ticket_sessions
+       WHERE group_folder = ? AND status = 'active'
+       ORDER BY updated_at DESC LIMIT 1`,
+    )
+    .get(groupFolder) as { ticket_id: string; session_id: string } | undefined;
+  if (!row) return undefined;
+  return { ticketId: row.ticket_id, sessionId: row.session_id };
 }
 
 export function getAllSessions(): Record<string, string> {

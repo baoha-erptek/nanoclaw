@@ -35,10 +35,12 @@ import {
   getNewMessages,
   getRegisteredGroup,
   getRouterState,
+  getTicketSession,
   initDatabase,
   setRegisteredGroup,
   setRouterState,
   setSession,
+  setTicketSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
@@ -63,6 +65,21 @@ import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+// Ticket ID pattern for JIRA tickets (configurable per-project)
+const TICKET_RE = /\b(NCNB-\d+)\b/i;
+
+/**
+ * Extract a JIRA ticket ID from a batch of messages.
+ * Checks the most recent message first.
+ */
+function extractTicketId(messages: NewMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const match = messages[i].content.match(TICKET_RE);
+    if (match) return match[1].toUpperCase();
+  }
+  return null;
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -182,6 +199,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
+  // Extract ticket ID from messages for per-ticket session isolation
+  const ticketId = extractTicketId(missedMessages);
+  if (ticketId) {
+    logger.info(
+      { group: group.name, ticketId },
+      'Detected JIRA ticket in messages',
+    );
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -212,32 +238,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    ticketId,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -269,10 +304,23 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  ticketId: string | null,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+
+  // Per-ticket session isolation: use ticket-specific session when ticket detected,
+  // fall back to group-level session for general chat
+  const sessionId = ticketId
+    ? getTicketSession(group.folder, ticketId)
+    : sessions[group.folder];
+
+  if (ticketId) {
+    logger.info(
+      { group: group.name, ticketId, hasSession: !!sessionId },
+      sessionId ? 'Resuming ticket session' : 'Starting fresh ticket session',
+    );
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -303,8 +351,14 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          if (ticketId) {
+            // Save to ticket-specific session store
+            setTicketSession(group.folder, ticketId, output.newSessionId);
+          } else {
+            // Save to group-level session store
+            sessions[group.folder] = output.newSessionId;
+            setSession(group.folder, output.newSessionId);
+          }
         }
         await onOutput(output);
       }
@@ -327,8 +381,12 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      if (ticketId) {
+        setTicketSession(group.folder, ticketId, output.newSessionId);
+      } else {
+        sessions[group.folder] = output.newSessionId;
+        setSession(group.folder, output.newSessionId);
+      }
     }
 
     if (output.status === 'error') {

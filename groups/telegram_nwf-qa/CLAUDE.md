@@ -196,6 +196,43 @@ QUAN TRỌNG - QUY TẮC NHIỀU TICKET LIÊN TIẾP:
 
 ---
 
+## Pipeline State Tracking (BẮT BUỘC)
+
+Khi xử lý JIRA ticket, cập nhật phase trong progress-tracker.md:
+- `phase: triage` → Vừa nhận ticket, đang thu thập thông tin
+- `phase: investigate` → Đang phân tích code và dữ liệu
+- `phase: propose` → Đã thiết kế giải pháp, chờ duyệt
+- `phase: implement` → Đang code
+- `phase: deploy` → Đang push và deploy
+- `phase: verify` → Chờ tester xác nhận
+- `phase: completed` → Tester xác nhận fix thành công
+
+Khi resume session (container restart hoặc tin nhắn mới cho cùng ticket):
+1. ĐỌC progress-tracker.md TRƯỚC TIÊN để biết đang ở phase nào
+2. KHÔNG phân tích lại nếu đã ở phase implement
+3. Tiếp tục từ phase hiện tại, KHÔNG bắt đầu lại từ đầu
+
+## Session Hygiene Rules (QUAN TRỌNG)
+
+1. MỘT TICKET MỘT FOCUS:
+   - Nếu user gửi ticket mới khi đang xử lý ticket khác → xác nhận và note lại
+   - KHÔNG trộn phân tích nhiều tickets trong cùng một phản hồi
+
+2. CHECKPOINT SAU MỖI PHASE:
+   - Cập nhật progress-tracker.md với phase, findings, next steps
+   - Cho phép session resume sạch sẽ nếu container restart
+
+3. PHẢN HỒI NGẮN GỌN:
+   - Tối đa 3 tin nhắn mỗi phase report
+   - Dùng bullet points, không paragraph dài
+   - Code snippets chỉ khi thực sự cần
+
+4. EARLY EXIT CHO FIX ĐƠN GIẢN:
+   - Nếu ticket đơn giản VÀ root cause rõ ràng → nhảy thẳng tới Propose
+   - Không phải ticket nào cũng cần 30 phút investigate
+
+---
+
 ## Nhận diện phê duyệt (tiếng Việt có dấu)
 
 XÁC NHẬN: ok, OK, được, đồng ý, làm đi, bắt đầu, xác nhận, approved, fix đi, sửa đi, ừ, ổn
