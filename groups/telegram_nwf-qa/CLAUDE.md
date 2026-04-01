@@ -178,11 +178,11 @@ Ví dụ: "Đã nhận ticket NCNB-XXXX. Đang phân tích, vui lòng chờ tron
 mkdir -p /workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/tasks
 ```
 
-2. Tạo worktree riêng cho ticket:
+2. Tạo worktree riêng cho ticket (từ master, KHÔNG phải develop):
 ```bash
 cd /workspace/extra/hr_project
-git fetch origin develop
-git worktree add .worktrees/NCNB-XXXX -b bugfix/NCNB-XXXX-short-desc origin/develop
+git fetch origin master
+git worktree add .worktrees/NCNB-XXXX -b bugfix/NCNB-XXXX-short-desc origin/master
 ```
 Nếu branch đã tồn tại (từ lần trước): `git worktree add .worktrees/NCNB-XXXX bugfix/NCNB-XXXX-short-desc`
 
@@ -301,7 +301,7 @@ Nếu CÓ bất kỳ model file nào được thay đổi:
 - TẤT CẢ tests PHẢI PASS trước khi commit
 - Bao gồm test file trong cùng commit
 
-### Bước 4b: Deploy
+### Bước 4b: Deploy (Push branch, KHÔNG merge)
 
 1. Commit:
 ```bash
@@ -311,34 +311,35 @@ git commit -m "[module_name] fix(NCNB-XXXX): mô tả ngắn (tiếng Anh)"
 ```
 KHÔNG thêm Claude signature vào commit.
 
-2. Push và merge:
+2. Push branch (KHÔNG merge vào develop):
 ```bash
-git push origin bugfix/NCNB-XXXX-short-desc
-# Merge vào develop (direct push)
-git checkout develop
-git merge bugfix/NCNB-XXXX-short-desc
-git push origin develop
-git checkout bugfix/NCNB-XXXX-short-desc
+git push -u origin bugfix/NCNB-XXXX-short-desc
 ```
+QUAN TRỌNG: KHÔNG checkout develop, KHÔNG merge, KHÔNG push develop.
+Branch sẽ tự động xuất hiện trong Branch Hub dropdown.
 
-3. Kiểm tra auto-deploy:
-```bash
-sshpass -p "$SSH_TEST_PASS" ssh -o StrictHostKeyChecking=no \
-  -p $SSH_TEST_PORT $SSH_TEST_USER@$SSH_TEST_HOST \
-  "docker logs --tail 30 nwf_odoo_test 2>&1"
-```
+3. Cập nhật phase: `phase: deploy`
 
-4. Cập nhật phase: `phase: deploy`
-
-### Bước 5: Xác nhận
+### Bước 5: Xác nhận (qua Branch Hub)
 
 - KIỂM TRA BẮT BUỘC trước khi báo hoàn thành:
   ```bash
   test -f /workspace/extra/hr_project/.docs/tasks/NCNB-XXXX/progress-tracker.md || echo "CẢNH BÁO: Thiếu progress-tracker.md!"
   ```
-- Cập nhật progress-tracker.md với status, commit hashes, ngày deploy
-- Cập nhật Confluence page với kết quả deploy và commit hashes
-- Thông báo tester: "Đã deploy lên test server, vui lòng kiểm tra"
+- Cập nhật progress-tracker.md với status, commit hashes, ngày push
+- Cập nhật Confluence page với kết quả và commit hashes
+- Thông báo tester qua Telegram (ĐỊNH DẠNG NÀY):
+```
+*NCNB-XXXX: [Tiêu đề]*
+Branch `bugfix/NCNB-XXXX-desc` đã được push.
+
+_Kiểm tra:_
+1. Vào Branch Hub: https://hub-dev.erptek.net
+2. Chọn branch `bugfix/NCNB-XXXX-desc` và nhấn Deploy
+3. Truy cập: https://ncnb-XXXX-dev.erptek.net
+
+Vui lòng kiểm tra và phản hồi.
+```
 - Cập nhật phase: `phase: verify`
 - Nếu tester báo lỗi:
   - Kiểm tra lại TẤT CẢ comments mới nhất trên JIRA
@@ -348,16 +349,41 @@ sshpass -p "$SSH_TEST_PASS" ssh -o StrictHostKeyChecking=no \
 ### Bước 6: Dọn dẹp (opsx:archive)
 
 1. Cập nhật progress-tracker.md: `phase: completed`
-2. Xóa worktree:
+
+2. Quyết định merge (KHÔNG tự động — hỏi hoặc đánh giá):
+   - Merge vào develop CHỈ KHI:
+     a. Người dùng yêu cầu rõ ràng ("merge vào develop", "gộp vào develop")
+     b. HOẶC ticket đáp ứng TẤT CẢ 3 tiêu chí trivial:
+        - Phạm vi: 1 file, <20 dòng thay đổi
+        - Rủi ro: chỉ cosmetic (label, string, CSS, i18n)
+        - Loại: sửa typo, thêm bản dịch, đổi tên field label
+   - Nếu ticket trivial -> đề xuất: "Ticket này khá đơn giản, bạn muốn merge trực tiếp vào develop không?"
+   - Nếu KHÔNG merge -> giữ branch trên remote, tester tiếp tục dùng Branch Hub
+
+3. Nếu merge vào develop (từ main repo, KHÔNG từ worktree):
+```bash
+cd /workspace/extra/hr_project
+git checkout develop && git pull origin develop
+git merge bugfix/NCNB-XXXX-short-desc --no-edit
+git push origin develop
+```
+
+4. Xóa worktree local (LUÔN LÀM):
 ```bash
 cd /workspace/extra/hr_project
 git worktree remove .worktrees/NCNB-XXXX --force
-# Xóa branch nếu đã merge vào develop
-git branch -d bugfix/NCNB-XXXX-short-desc 2>/dev/null || true
 ```
-3. Nếu có thay đổi kiến trúc -> cập nhật `.docs/architecture/`
-4. Nếu phát hiện business rules mới -> cập nhật `.docs/` tương ứng
-5. Ghi nhận bài học (learned skills)
+
+5. Xóa branch (CHỈ nếu đã merge):
+```bash
+git branch -d bugfix/NCNB-XXXX-short-desc 2>/dev/null || true
+git push origin --delete bugfix/NCNB-XXXX-short-desc 2>/dev/null || true
+```
+Nếu CHƯA merge -> KHÔNG xóa branch remote (tester có thể cần)
+
+6. Nếu có thay đổi kiến trúc -> cập nhật `.docs/architecture/`
+7. Nếu phát hiện business rules mới -> cập nhật `.docs/` tương ứng
+8. Ghi nhận bài học (learned skills)
 
 ---
 
@@ -427,15 +453,31 @@ KẾT QUẢ TEST:
 - Local Odoo: docker exec hr_project_odoo odoo -d hr_project_db -u MODULE --stop-after-init
 - Test server SSH: sshpass -p "$SSH_TEST_PASS" ssh -p $SSH_TEST_PORT $SSH_TEST_USER@$SSH_TEST_HOST
 - Test container: nwf_odoo_test
-- Auto-deploy: push vào develop -> auto-deploy watcher trên .243 tự động pull + upgrade
+- Auto-deploy (develop): push vào develop -> auto-deploy watcher trên .243 tự động pull + upgrade
+- Branch Hub: https://hub-dev.erptek.net -- testers deploy feature branch tại đây, URL: ncnb-XXXX-dev.erptek.net
+
+## Branch Environment Hub (Kiểm tra riêng từng ticket)
+
+Mỗi ticket được kiểm tra riêng biệt qua Branch Hub thay vì merge vào develop.
+
+- Dashboard: https://hub-dev.erptek.net
+- Branches tự động xuất hiện sau khi push (Hub dùng `git ls-remote`, filter `feature/*`, `bugfix/*`, `hotfix/*`)
+- URL pattern: `bugfix/NCNB-1234-fix-desc` -> `https://ncnb-1234-dev.erptek.net`
+- Tối đa 4 branch deploy đồng thời
+- Tester tự chọn branch và nhấn Deploy trên dashboard
+- Tester nhấn Remove trên dashboard khi kiểm tra xong
+- Agent KHÔNG cần gọi API Hub -- chỉ cần push branch là đủ
 
 ## Git Conventions
 
+- Base branch: origin/master (KHÔNG phải develop)
 - Branch: bugfix/NCNB-XXXX-description hoặc feature/NCNB-XXXX-description
 - Worktree: .worktrees/NCNB-XXXX/ (mỗi ticket một worktree)
 - Commit: [module_name] fix(NCNB-XXXX): description (tiếng Anh)
 - KHÔNG thêm Claude signature vào commit
-- Push trực tiếp vào develop, không tạo PR
+- Push branch riêng, KHÔNG tự động merge vào develop
+- Testers deploy branch qua Branch Hub (hub-dev.erptek.net)
+- Chỉ merge vào develop khi được yêu cầu hoặc ticket trivial
 
 ---
 
