@@ -91,6 +91,16 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS ticket_worktrees (
+      group_folder TEXT NOT NULL,
+      ticket_id TEXT NOT NULL,
+      worktree_path TEXT NOT NULL,
+      branch_name TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      last_activity INTEGER DEFAULT (strftime('%s','now')),
+      PRIMARY KEY (group_folder, ticket_id)
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -585,6 +595,91 @@ export function getActiveTicketForGroup(
     .get(groupFolder) as { ticket_id: string; session_id: string } | undefined;
   if (!row) return undefined;
   return { ticketId: row.ticket_id, sessionId: row.session_id };
+}
+
+// --- Ticket worktree accessors ---
+
+export interface TicketWorktree {
+  group_folder: string;
+  ticket_id: string;
+  worktree_path: string;
+  branch_name: string;
+  status: string;
+  created_at: number;
+  last_activity: number;
+}
+
+export function createWorktreeRecord(
+  groupFolder: string,
+  ticketId: string,
+  worktreePath: string,
+  branchName: string,
+): void {
+  db.prepare(
+    `INSERT INTO ticket_worktrees (group_folder, ticket_id, worktree_path, branch_name)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(group_folder, ticket_id) DO UPDATE SET
+       worktree_path = excluded.worktree_path,
+       branch_name = excluded.branch_name,
+       status = 'active',
+       last_activity = strftime('%s','now')`,
+  ).run(groupFolder, ticketId, worktreePath, branchName);
+}
+
+export function updateWorktreeActivity(
+  groupFolder: string,
+  ticketId: string,
+): void {
+  db.prepare(
+    `UPDATE ticket_worktrees SET last_activity = strftime('%s','now')
+     WHERE group_folder = ? AND ticket_id = ?`,
+  ).run(groupFolder, ticketId);
+}
+
+export function getActiveWorktrees(groupFolder?: string): TicketWorktree[] {
+  if (groupFolder) {
+    return db
+      .prepare(
+        `SELECT * FROM ticket_worktrees WHERE group_folder = ? AND status = 'active' ORDER BY last_activity DESC`,
+      )
+      .all(groupFolder) as TicketWorktree[];
+  }
+  return db
+    .prepare(
+      `SELECT * FROM ticket_worktrees WHERE status = 'active' ORDER BY last_activity DESC`,
+    )
+    .all() as TicketWorktree[];
+}
+
+export function getExpiredWorktrees(maxIdleDays: number): TicketWorktree[] {
+  const threshold = Math.floor(Date.now() / 1000) - maxIdleDays * 86400;
+  return db
+    .prepare(
+      `SELECT * FROM ticket_worktrees WHERE status = 'active' AND last_activity < ?`,
+    )
+    .all(threshold) as TicketWorktree[];
+}
+
+export function updateWorktreeStatus(
+  groupFolder: string,
+  ticketId: string,
+  status: string,
+): void {
+  db.prepare(
+    `UPDATE ticket_worktrees SET status = ?, last_activity = strftime('%s','now')
+     WHERE group_folder = ? AND ticket_id = ?`,
+  ).run(status, groupFolder, ticketId);
+}
+
+export function getWorktreeForTicket(
+  groupFolder: string,
+  ticketId: string,
+): TicketWorktree | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM ticket_worktrees WHERE group_folder = ? AND ticket_id = ? AND status = 'active'`,
+    )
+    .get(groupFolder, ticketId) as TicketWorktree | undefined;
 }
 
 export function getAllSessions(): Record<string, string> {
