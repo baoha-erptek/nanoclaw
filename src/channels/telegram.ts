@@ -185,7 +185,14 @@ function createTelegramChannel(opts: ChannelOpts): Channel | null {
     return null;
   }
 
-  const bot = new Bot(token);
+  // Force IPv4 — this server has no IPv6 connectivity, and node-fetch
+  // tries IPv6 first (AAAA record exists for api.telegram.org), causing ETIMEDOUT.
+  const ipv4Agent = new https.Agent({ family: 4 });
+  const bot = new Bot(token, {
+    client: {
+      baseFetchConfig: { agent: ipv4Agent },
+    },
+  });
   let connected = false;
   let botUsername = '';
 
