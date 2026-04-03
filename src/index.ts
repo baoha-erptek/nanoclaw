@@ -6,6 +6,7 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  SESSION_TTL_HOURS,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -31,6 +32,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getGroupSessionWithTTL,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
@@ -310,14 +312,21 @@ async function runAgent(
   const isMain = group.isMain === true;
 
   // Per-ticket session isolation: use ticket-specific session when ticket detected,
-  // fall back to group-level session for general chat
+  // fall back to group-level session for general chat.
+  // Both paths use TTL-aware lookups — sessions older than SESSION_TTL_HOURS
+  // are auto-expired to prevent bloated replay on re-opened tickets.
   const sessionId = ticketId
     ? getTicketSession(group.folder, ticketId)
-    : sessions[group.folder];
+    : getGroupSessionWithTTL(group.folder);
 
   if (ticketId) {
     logger.info(
-      { group: group.name, ticketId, hasSession: !!sessionId },
+      {
+        group: group.name,
+        ticketId,
+        hasSession: !!sessionId,
+        sessionTtlHours: SESSION_TTL_HOURS,
+      },
       sessionId ? 'Resuming ticket session' : 'Starting fresh ticket session',
     );
   }

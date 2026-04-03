@@ -53,6 +53,10 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '900000', 10); // 15min default — how long to keep container alive after last result
+export const SESSION_TTL_HOURS = Math.max(
+  1,
+  parseInt(process.env.SESSION_TTL_HOURS || '24', 10) || 24,
+); // Sessions older than this are expired on next access (forces fresh start)
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

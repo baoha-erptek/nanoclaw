@@ -2,7 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  SESSION_TTL_HOURS,
+  STORE_DIR,
+} from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -157,6 +162,18 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Add updated_at column to sessions table for TTL-based expiry (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE sessions ADD COLUMN updated_at INTEGER DEFAULT (strftime('%s','now'))`,
+    );
+    database.exec(
+      `UPDATE sessions SET updated_at = strftime('%s','now') WHERE updated_at IS NULL`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -541,8 +558,53 @@ export function getSession(groupFolder: string): string | undefined {
 
 export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
-    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
+    `INSERT INTO sessions (group_folder, session_id, updated_at) VALUES (?, ?, strftime('%s','now'))
+     ON CONFLICT(group_folder) DO UPDATE SET
+       session_id = excluded.session_id,
+       updated_at = strftime('%s','now')`,
   ).run(groupFolder, sessionId);
+}
+
+export function getGroupSessionWithTTL(
+  groupFolder: string,
+): string | undefined {
+  const row = db
+    .prepare(
+      'SELECT session_id, updated_at FROM sessions WHERE group_folder = ?',
+    )
+    .get(groupFolder) as
+    | { session_id: string; updated_at: number | null }
+    | undefined;
+
+  if (!row) return undefined;
+
+  // Pre-migration rows have no timestamp — treat as expired
+  if (row.updated_at == null) {
+    logger.info(
+      { groupFolder },
+      'Expired group session (no timestamp, pre-migration)',
+    );
+    db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+    return undefined;
+  }
+
+  const ttlSeconds = SESSION_TTL_HOURS * 3600;
+  const ageSeconds = Math.floor(Date.now() / 1000) - row.updated_at;
+
+  if (ageSeconds > ttlSeconds) {
+    logger.info(
+      {
+        groupFolder,
+        ageHours: Math.round(ageSeconds / 3600),
+        ttlHours: SESSION_TTL_HOURS,
+      },
+      'Expired stale group session (TTL exceeded)',
+    );
+    db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
+    return undefined;
+  }
+
+  return row.session_id;
 }
 
 // --- Ticket session accessors ---
@@ -553,10 +615,35 @@ export function getTicketSession(
 ): string | undefined {
   const row = db
     .prepare(
-      `SELECT session_id FROM ticket_sessions WHERE group_folder = ? AND ticket_id = ? AND status = 'active'`,
+      `SELECT session_id, updated_at FROM ticket_sessions WHERE group_folder = ? AND ticket_id = ? AND status = 'active'`,
     )
-    .get(groupFolder, ticketId) as { session_id: string } | undefined;
-  return row?.session_id;
+    .get(groupFolder, ticketId) as
+    | { session_id: string; updated_at: number }
+    | undefined;
+
+  if (!row) return undefined;
+
+  const ttlSeconds = SESSION_TTL_HOURS * 3600;
+  const ageSeconds = Math.floor(Date.now() / 1000) - row.updated_at;
+
+  if (ageSeconds > ttlSeconds) {
+    db.prepare(
+      `UPDATE ticket_sessions SET status = 'expired', updated_at = strftime('%s','now')
+       WHERE group_folder = ? AND ticket_id = ?`,
+    ).run(groupFolder, ticketId);
+    logger.info(
+      {
+        groupFolder,
+        ticketId,
+        ageHours: Math.round(ageSeconds / 3600),
+        ttlHours: SESSION_TTL_HOURS,
+      },
+      'Expired stale ticket session (TTL exceeded)',
+    );
+    return undefined;
+  }
+
+  return row.session_id;
 }
 
 export function setTicketSession(
