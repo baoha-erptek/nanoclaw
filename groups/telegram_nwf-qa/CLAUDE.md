@@ -297,6 +297,19 @@ cd /workspace/extra/hr_project/.worktrees/NCNB-XXXX
 3. Cập nhật progress-tracker.md sau mỗi task hoàn thành
 4. Cập nhật phase: `phase: implement`
 
+*TDD Workflow BẮT BUỘC:*
+Khi triển khai code, PHẢI theo quy trình TDD từ:
+- Agent: `.claude/agents/tdd-guide.md` (Two-Phase Testing specialist)
+- Skill: `.claude/skills/tdd-workflow/SKILL.md` (workflow chi tiết)
+
+Quy trình:
+1. Viết test TRƯỚC (RED) — dùng TransactionCase, factory pattern
+2. Chạy test — xác nhận FAIL
+3. Viết code tối thiểu (GREEN) — chỉ đủ để pass test
+4. Chạy test — xác nhận PASS
+5. Refactor (IMPROVE)
+6. Kiểm tra coverage
+
 *HAI PHA KIỂM TRA BẮT BUỘC (Two-Phase Testing):*
 Mọi ticket có thay đổi Python code (KHÔNG phải CONFIG-ONLY) PHẢI qua đủ 2 pha:
 - Pha 1: Xác minh SQL (`self.env.cr.execute()`) -- kiểm tra dữ liệu, schema
