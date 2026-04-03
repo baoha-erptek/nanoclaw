@@ -164,6 +164,18 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
+  // Create pr_merge_events table for tracking processed PR merges
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS pr_merge_events (
+      pr_number INTEGER PRIMARY KEY,
+      ticket_id TEXT NOT NULL,
+      branch_name TEXT NOT NULL,
+      merged_at TEXT NOT NULL,
+      processed_at TEXT NOT NULL,
+      chat_jid TEXT NOT NULL
+    );
+  `);
+
   // Add updated_at column to sessions table for TTL-based expiry (migration for existing DBs)
   try {
     database.exec(
@@ -682,6 +694,35 @@ export function getActiveTicketForGroup(
     .get(groupFolder) as { ticket_id: string; session_id: string } | undefined;
   if (!row) return undefined;
   return { ticketId: row.ticket_id, sessionId: row.session_id };
+}
+
+// --- PR merge event accessors ---
+
+export function isPrMergeProcessed(prNumber: number): boolean {
+  const row = db
+    .prepare('SELECT pr_number FROM pr_merge_events WHERE pr_number = ?')
+    .get(prNumber);
+  return !!row;
+}
+
+export function recordPrMerge(
+  prNumber: number,
+  ticketId: string,
+  branchName: string,
+  mergedAt: string,
+  chatJid: string,
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO pr_merge_events (pr_number, ticket_id, branch_name, merged_at, processed_at, chat_jid)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    prNumber,
+    ticketId,
+    branchName,
+    mergedAt,
+    new Date().toISOString(),
+    chatJid,
+  );
 }
 
 // --- Ticket worktree accessors ---

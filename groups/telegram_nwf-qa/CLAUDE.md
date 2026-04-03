@@ -409,6 +409,13 @@ Vui lòng kiểm tra và phản hồi.
   - Hỏi thêm thông tin, tiếp tục sửa (quay lại bước 3 hoặc bước 4)
 - Nếu tester xác nhận OK: dọn dẹp
 
+*MERGE TỰ ĐỘNG PHÁT HIỆN:*
+Bot tự động kiểm tra GitHub mỗi 2 phút để phát hiện PR đã merge.
+Khi PR merge được phát hiện, bot sẽ:
+1. Gửi thông báo lên Telegram
+2. Tạo tin nhắn tự động để trigger Bước 6 (dọn dẹp)
+Khi nhận được thông báo merge tự động, BỎ QUA bước chờ xác nhận và chuyển ngay sang Bước 6.
+
 ### Bước 6: Dọn dẹp (opsx:archive)
 
 1. Cập nhật progress-tracker.md: `phase: completed`

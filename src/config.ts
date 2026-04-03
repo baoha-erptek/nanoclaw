@@ -62,6 +62,17 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
+// PR merge watcher: polls GitHub for merged PRs to trigger post-merge pipeline steps
+export const GITHUB_REPO = process.env.GITHUB_REPO || 'baoha-erptek/hr_project';
+export const PR_MERGE_POLL_INTERVAL = parseInt(
+  process.env.PR_MERGE_POLL_INTERVAL || '120000',
+  10,
+); // 2min default
+export const PR_POLL_WINDOW_MS = parseInt(
+  process.env.PR_POLL_WINDOW_MS || '600000',
+  10,
+); // 10min window — only process PRs merged within this window
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
