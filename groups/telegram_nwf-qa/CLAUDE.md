@@ -352,7 +352,17 @@ git push -u origin bugfix/NCNB-XXXX-short-desc
 QUAN TRỌNG: KHÔNG checkout develop, KHÔNG merge, KHÔNG push develop.
 Branch sẽ tự động xuất hiện trong Branch Hub dropdown.
 
-3. Tạo PR vào develop (BẮT BUỘC):
+3. Rebase lên develop TRƯỚC KHI tạo PR (BẮT BUỘC):
+```bash
+cd /workspace/extra/hr_project/.worktrees/NCNB-XXXX
+git fetch origin develop
+git rebase origin/develop
+git push --force-with-lease origin bugfix/NCNB-XXXX-short-desc
+```
+QUAN TRỌNG: Branch được tạo từ master nhưng PR target develop.
+Nếu KHÔNG rebase, PR sẽ bao gồm TẤT CẢ commits khác biệt giữa master và develop.
+
+4. Tạo PR vào develop (BẮT BUỘC):
 ```bash
 cd /workspace/extra/hr_project/.worktrees/NCNB-XXXX
 gh pr create --base develop \
@@ -368,7 +378,7 @@ gh pr create --base develop \
 ```
 QUAN TRỌNG: KHÔNG tự động merge PR. Tester/reviewer duyệt và merge.
 
-4. Gửi PR link lên Telegram (ĐỊNH DẠNG NÀY):
+5. Gửi PR link lên Telegram (ĐỊNH DẠNG NÀY):
 ```
 *NCNB-XXXX: [Tiêu đề]*
 Branch `bugfix/NCNB-XXXX-desc` đã được push.
@@ -381,7 +391,7 @@ _Kiểm tra:_
 Vui lòng kiểm tra và phản hồi.
 ```
 
-5. Cập nhật phase: `phase: deploy`
+6. Cập nhật phase: `phase: deploy`
 
 ### Bước 5: Xác nhận (qua Branch Hub)
 
