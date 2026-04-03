@@ -206,6 +206,8 @@ QUAN TRỌNG - QUY TẮC NHIỀU TICKET LIÊN TIẾP:
 
 ### Bước 2: Tìm hiểu (opsx:explore)
 
+*BẮT BUỘC sử dụng Plan mode* trong bước này. Plan mode cho phép suy luận sâu mà không thực thi thay đổi sớm. Chỉ thoát Plan mode khi chuyển sang Bước 4 (Triển khai).
+
 *Nạp ngữ cảnh (tự động):*
 - LUÔN đọc: `.docs/architecture/tech-stack.md`, `.docs/architecture/project-constraints.md`
 - Nếu liên quan attendance/HR: đọc `.docs/hr-attendance-system/`
@@ -217,6 +219,14 @@ QUAN TRỌNG - QUY TẮC NHIỀU TICKET LIÊN TIẾP:
 - BẮT BUỘC: Lấy TẤT CẢ comments bằng endpoint riêng (xem mục "Truy cập JIRA")
 - BẮT BUỘC: Tải TẤT CẢ attachments từ JIRA (xem mục "Tải JIRA Attachments")
 - Phân tích codebase tại worktree: /workspace/extra/hr_project/.worktrees/NCNB-XXXX/
+- BẮT BUỘC: Kiểm tra Epic field của ticket. Nếu chưa có Epic:
+  1. Tìm Epic phù hợp nhất bằng JQL: `project=NCNB AND issuetype=Epic AND status!=Done`
+  2. Gán Epic cho ticket qua JIRA API: `PUT $ATLASSIAN_SITE/rest/api/3/issue/NCNB-XXXX`
+  3. Ghi nhận Epic vào investigation-plan.md
+- BẮT BUỘC: Tìm và link ticket liên quan trên JIRA:
+  1. Tìm bằng JQL: `text ~ "keyword" AND key != NCNB-XXXX`
+  2. Link ticket liên quan qua: `POST $ATLASSIAN_SITE/rest/api/3/issueLink`
+  3. Phân tích Epic và các ticket vừa link để hiểu thêm ngữ cảnh vấn đề
 - Xác định nguyên nhân gốc (root cause)
 - Ghi kết quả vào .docs/tasks/NCNB-XXXX/investigation-plan.md
 - Cập nhật phase: `phase: investigate`
@@ -228,6 +238,11 @@ QUAN TRỌNG - QUY TẮC NHIỀU TICKET LIÊN TIẾP:
    - design.md: thiết kế kỹ thuật chi tiết
    - tasks/01-*.md, 02-*.md...: các task triển khai cụ thể
    KHÔNG tạo thư mục openspec/changes/ riêng.
+
+   *Nếu ticket là CONFIG-ONLY hoặc GUI-related:*
+   - Kiểm tra xem `frontend-design` skill có áp dụng không (đọc `.claude/skills/frontend-design/SKILL.md`)
+   - Nếu liên quan đến giao diện, CSS, layout -> sử dụng frontend-design principles
+   - Nếu chỉ là cấu hình menu/action -> config-guide path bình thường
 
 2. Đồng bộ lên Confluence:
 ```bash
@@ -282,6 +297,12 @@ cd /workspace/extra/hr_project/.worktrees/NCNB-XXXX
 3. Cập nhật progress-tracker.md sau mỗi task hoàn thành
 4. Cập nhật phase: `phase: implement`
 
+*HAI PHA KIỂM TRA BẮT BUỘC (Two-Phase Testing):*
+Mọi ticket có thay đổi Python code (KHÔNG phải CONFIG-ONLY) PHẢI qua đủ 2 pha:
+- Pha 1: Xác minh SQL (`self.env.cr.execute()`) -- kiểm tra dữ liệu, schema
+- Pha 2: ORM TransactionCase (create, write, search, unlink) -- kiểm tra logic
+KHÔNG ĐƯỢC commit nếu thiếu bất kỳ pha nào.
+
 *QUY TẮC UNIT TEST BẮT BUỘC:*
 Trước mỗi git commit, kiểm tra:
 ```bash
@@ -318,7 +339,36 @@ git push -u origin bugfix/NCNB-XXXX-short-desc
 QUAN TRỌNG: KHÔNG checkout develop, KHÔNG merge, KHÔNG push develop.
 Branch sẽ tự động xuất hiện trong Branch Hub dropdown.
 
-3. Cập nhật phase: `phase: deploy`
+3. Tạo PR vào develop (BẮT BUỘC):
+```bash
+cd /workspace/extra/hr_project/.worktrees/NCNB-XXXX
+gh pr create --base develop \
+  --title "[module_name] fix(NCNB-XXXX): mô tả ngắn" \
+  --body "## Tóm tắt
+- Mô tả fix
+
+## JIRA
+- [NCNB-XXXX]($ATLASSIAN_SITE/browse/NCNB-XXXX)
+
+## Confluence
+- [Link Confluence]"
+```
+QUAN TRỌNG: KHÔNG tự động merge PR. Tester/reviewer duyệt và merge.
+
+4. Gửi PR link lên Telegram (ĐỊNH DẠNG NÀY):
+```
+*NCNB-XXXX: [Tiêu đề]*
+Branch `bugfix/NCNB-XXXX-desc` đã được push.
+PR: [link PR vào develop]
+
+_Kiểm tra:_
+1. Review PR trên GitHub hoặc vào Branch Hub: https://hub-dev.erptek.net
+2. Deploy branch và test tại: https://ncnb-XXXX-dev.erptek.net
+
+Vui lòng kiểm tra và phản hồi.
+```
+
+5. Cập nhật phase: `phase: deploy`
 
 ### Bước 5: Xác nhận (qua Branch Hub)
 
@@ -381,9 +431,14 @@ git push origin --delete bugfix/NCNB-XXXX-short-desc 2>/dev/null || true
 ```
 Nếu CHƯA merge -> KHÔNG xóa branch remote (tester có thể cần)
 
-6. Nếu có thay đổi kiến trúc -> cập nhật `.docs/architecture/`
-7. Nếu phát hiện business rules mới -> cập nhật `.docs/` tương ứng
-8. Ghi nhận bài học (learned skills)
+6. *BA BƯỚC BẮT BUỘC trước khi hoàn thành:*
+   a. **Cập nhật task documents** (BẮT BUỘC): Hoàn thiện progress-tracker.md với commit hash, PR URL, kết quả
+   b. **Cập nhật Confluence** (BẮT BUỘC): Cập nhật page với kết quả cuối cùng, commit hash, PR link
+   c. **Chạy /learn** (BẮT BUỘC): Trích xuất patterns tái sử dụng -> `~/.claude/skills/learned/`
+      Không chạy /learn = mất kiến thức cho team
+
+7. Nếu có thay đổi kiến trúc -> cập nhật `.docs/architecture/`
+8. Nếu phát hiện business rules mới -> cập nhật `.docs/` tương ứng
 
 ---
 
